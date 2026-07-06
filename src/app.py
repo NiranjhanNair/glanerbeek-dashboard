@@ -420,45 +420,7 @@ st.markdown(
         border-radius: 12px;
     }
 
-    /* ---- countdown card ---- */
-    .countdown-card {
-        border-radius: 14px;
-        padding: 1.2rem 1.4rem;
-        background: linear-gradient(135deg, #422006 0%, #1c1917 100%);
-        border: 1px solid rgba(234,179,8,0.25);
-        margin-bottom: 0.8rem;
-        box-shadow: 0 2px 12px rgba(0,0,0,.3);
-    }
-    .countdown-card .zone-name {
-        font-weight: 700;
-        font-size: 1.05rem;
-        color: #fef08a;
-    }
-    .countdown-card .timer {
-        font-size: 2rem;
-        font-weight: 800;
-        letter-spacing: 0.04em;
-        color: #eab308;
-        font-variant-numeric: tabular-nums;
-    }
-    .countdown-card .timer-label {
-        font-size: 0.8rem;
-        color: #a3a3a3;
-        margin-top: 2px;
-    }
-    .countdown-card .progress-bg {
-        height: 6px;
-        border-radius: 3px;
-        background: rgba(255,255,255,0.08);
-        margin-top: 0.6rem;
-        overflow: hidden;
-    }
-    .countdown-card .progress-fill {
-        height: 100%;
-        border-radius: 3px;
-        background: linear-gradient(90deg, #eab308, #f59e0b);
-        transition: width 0.4s ease;
-    }
+
 
     /* ---- data table styling ---- */
     .table-scroll-wrapper {
@@ -534,15 +496,7 @@ st.markdown(
         font-size: 0.85rem !important;
     }
 
-    /* ---- no-yellow message ---- */
-    .no-yellow {
-        color: #6b7280;
-        font-size: 0.9rem;
-        padding: 1rem;
-        text-align: center;
-        border: 1px dashed rgba(255,255,255,0.08);
-        border-radius: 12px;
-    }
+
 
     /* ---- live data cards in sidebar ---- */
     .live-card {
@@ -648,15 +602,7 @@ st.markdown(
         font-variant-numeric: tabular-nums;
     }
 
-    /* ---- countdown grid (desktop: side-by-side, mobile: stack) ---- */
-    .countdown-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: 0.8rem;
-    }
-    .countdown-grid .countdown-card {
-        margin-bottom: 0;
-    }
+
 
     /* ===== MOBILE RESPONSIVENESS ===== */
     @media (max-width: 768px) {
@@ -675,12 +621,7 @@ st.markdown(
         .risk-banner div[style*="text-align:right"] {
             text-align: center !important;
         }
-        .countdown-card .timer {
-            font-size: 1.5rem;
-        }
-        .countdown-card .zone-name {
-            font-size: 0.92rem;
-        }
+
         .plot-table th {
             padding: 0.4rem 0.6rem;
             font-size: 0.68rem;
@@ -711,9 +652,7 @@ st.markdown(
         .live-card .vwc-value {
             font-size: 0.95rem;
         }
-        .countdown-grid {
-            grid-template-columns: 1fr;
-        }
+
     }
     </style>
     """,
@@ -722,109 +661,35 @@ st.markdown(
 
 
 # ----------------------------------------------
-# 6. SIDEBAR -- MODE TOGGLE + CONTROLS
+# 6. DATA MODE TOGGLE + DATA FETCH
+#    (controls are rendered in Tab 1 below;
+#     data fetch must happen before the banner)
 # ----------------------------------------------
-with st.sidebar:
-    st.markdown("## Dashboard Controls")
+now = _dt.datetime.now()
+live_mode = st.toggle("Live Data Mode", value=False, key="live_mode")
 
-    live_mode = st.toggle("Live Data Mode", value=False, key="live_mode")
+# -- Fetch / update data regardless of where the UI lives --------
+if live_mode:
+    time_key = _get_cache_time_key()
+    live_data, success = fetch_live_data(time_key)
 
-    if live_mode:
-        st.markdown(
-            '<span class="mode-badge mode-live">LIVE — MajiSys Sensors</span>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Fetching last 24 h from ITC Twente sensor network.  "
-            "Worst-case VWC from top 40 cm depths."
-        )
-    else:
-        st.markdown(
-            '<span class="mode-badge mode-sim">SIMULATION — Manual</span>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Drag sliders to simulate VWC readings and test "
-            "ecological thresholds."
-        )
+    # Fallback logic: persist last-known-good data in session state
+    if success and live_data:
+        st.session_state.last_live_data = live_data
+        st.session_state.connection_ok = True
+    elif not success:
+        st.session_state.connection_ok = False
+        if st.session_state.last_live_data:
+            live_data = st.session_state.last_live_data
+        else:
+            live_data = {}
 
-    st.divider()
-
-    now = _dt.datetime.now()
-
-    # -- LIVE MODE ---------------------------------
-    if live_mode:
-        time_key = _get_cache_time_key()
-        live_data, success = fetch_live_data(time_key)
-
-        # Fallback logic: persist last-known-good data in session state
-        if success and live_data:
-            st.session_state.last_live_data = live_data
-            st.session_state.connection_ok = True
-        elif not success:
-            st.session_state.connection_ok = False
-            # Fall back to last-known values if available
-            if st.session_state.last_live_data:
-                live_data = st.session_state.last_live_data
-            else:
-                live_data = {}
-
-        # Update plots from live readings
-        for plot in st.session_state.plots:
-            if plot.logger_id in live_data:
-                plot.update(live_data[plot.logger_id], now)
-
-        # Render live reading cards in sidebar
-        for plot in st.session_state.plots:
-            ri = RISK_PALETTE[plot.risk_level]
-            has_data = plot.logger_id in live_data
-            vwc_display = f"{plot.vwc:.1f}%" if has_data else "-- no data"
-            st.markdown(
-                f"""
-                <div class="live-card" style="border-color:{ri['color']};">
-                    <div style="display:flex;justify-content:space-between;
-                                align-items:center;">
-                        <div>
-                            <div class="plot-label">
-                                <span class="risk-dot"
-                                      style="color:{ri['color']};
-                                             background:{ri['color']};"></span>
-                                {plot.id} — {plot.name}
-                            </div>
-                            <div class="plot-meta">
-                                Logger: {plot.logger_id} | Field {plot.field}
-                            </div>
-                        </div>
-                        <div class="vwc-value" style="color:{ri['color']};">
-                            {vwc_display}
-                        </div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    # -- MANUAL SIMULATION MODE --------------------
-    else:
-        for plot in st.session_state.plots:
-            ri = RISK_PALETTE[plot.risk_level]
-            label = f"**{plot.id}** — {plot.name}"
-            new_vwc = st.slider(
-                label,
-                min_value=0.0,
-                max_value=60.0,
-                value=plot.vwc,
-                step=0.5,
-                format="%.1f %%",
-                key=f"vwc_{plot.id}",
-            )
-            plot.update(new_vwc, now)
-
-    st.divider()
-    st.caption(
-        "VWC thresholds:  >=17% Optimal  |  >=13% Microbial Stress  |  "
-        ">=9% Severe  |  >=5% Wilting  |  <5% Cessation"
-    )
+    # Update plots from live readings
+    for plot in st.session_state.plots:
+        if plot.logger_id in live_data:
+            plot.update(live_data[plot.logger_id], now)
+else:
+    live_data = {}  # placeholder; sliders rendered in Tab 1
 
 
 # ----------------------------------------------
@@ -886,75 +751,77 @@ tab_dashboard, tab_audit = st.tabs(["Live Dashboard", "Data Pipeline Audit"])
 with tab_dashboard:
 
     # ============================================
-    # 9a. ACTION CENTER -- 48-HOUR COUNTDOWN
-    #     (Full-width block at the very top)
+    # 9a. DASHBOARD CONTROLS
+    #     (Mode toggle + live cards / sim sliders)
     # ============================================
-    st.markdown(
-        '<div class="section-title">48 h Labor Coordination Window</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Zones in Yellow (Microbial Stress, VWC 13-17%) trigger a "
-        "48-hour window for coordinated field intervention."
-    )
-
-    yellow_plots = [
-        p for p in st.session_state.plots if p.risk_level == 2
-    ]
-
-    if not yellow_plots:
+    if live_mode:
         st.markdown(
-            '<div class="no-yellow">'
-            "All Clear — No zones are currently in Yellow state.</div>",
+            '<span class="mode-badge mode-live">LIVE — MajiSys Sensors</span>',
             unsafe_allow_html=True,
         )
+        st.caption(
+            "Fetching last 24 h from ITC Twente sensor network.  "
+            "Worst-case VWC from top 40 cm depths."
+        )
+
+        # Render live reading cards
+        for plot in st.session_state.plots:
+            ri = RISK_PALETTE[plot.risk_level]
+            has_data = plot.logger_id in live_data
+            vwc_display = f"{plot.vwc:.1f}%" if has_data else "-- no data"
+            st.markdown(
+                f"""
+                <div class="live-card" style="border-color:{ri['color']};">
+                    <div style="display:flex;justify-content:space-between;
+                                align-items:center;">
+                        <div>
+                            <div class="plot-label">
+                                <span class="risk-dot"
+                                      style="color:{ri['color']};
+                                             background:{ri['color']};"></span>
+                                {plot.id} — {plot.name}
+                            </div>
+                            <div class="plot-meta">
+                                Logger: {plot.logger_id} | Field {plot.field}
+                            </div>
+                        </div>
+                        <div class="vwc-value" style="color:{ri['color']};">
+                            {vwc_display}
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
     else:
-        cards_html = '<div class="countdown-grid">'
-        for p in yellow_plots:
-            rem = remaining_48h(p.yellow_entry_time, now)
-            if rem is None:
-                continue
+        st.markdown(
+            '<span class="mode-badge mode-sim">SIMULATION — Manual</span>',
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Drag sliders to simulate VWC readings and test "
+            "ecological thresholds."
+        )
 
-            total_secs = rem.total_seconds()
-            hours = int(total_secs // 3600)
-            minutes = int((total_secs % 3600) // 60)
-            seconds = int(total_secs % 60)
-            pct = min(100.0, (total_secs / (48 * 3600)) * 100)
+        # Render simulation sliders
+        for plot in st.session_state.plots:
+            ri = RISK_PALETTE[plot.risk_level]
+            label = f"**{plot.id}** — {plot.name}"
+            new_vwc = st.slider(
+                label,
+                min_value=0.0,
+                max_value=60.0,
+                value=plot.vwc,
+                step=0.5,
+                format="%.1f %%",
+                key=f"vwc_{plot.id}",
+            )
+            plot.update(new_vwc, now)
 
-            # Urgency colour shift as time runs out
-            if pct > 50:
-                bar_gradient = (
-                    "linear-gradient(90deg, #22c55e, #eab308)"
-                )
-            elif pct > 20:
-                bar_gradient = (
-                    "linear-gradient(90deg, #eab308, #f97316)"
-                )
-            else:
-                bar_gradient = (
-                    "linear-gradient(90deg, #f97316, #ef4444)"
-                )
-
-            cards_html += f"""
-            <div class="countdown-card">
-                <div class="zone-name">
-                    {p.id} — {p.name}
-                </div>
-                <div class="timer">
-                    {hours:02d}h {minutes:02d}m {seconds:02d}s
-                </div>
-                <div class="timer-label">
-                    remaining of 48-hour coordination window
-                </div>
-                <div class="progress-bg">
-                    <div class="progress-fill"
-                         style="width:{pct:.1f}%;
-                                background:{bar_gradient};"></div>
-                </div>
-            </div>
-            """
-        cards_html += '</div>'
-        st.markdown(cards_html, unsafe_allow_html=True)
+    st.caption(
+        "VWC thresholds:  >=17% Optimal  |  >=13% Microbial Stress  |  "
+        ">=9% Severe  |  >=5% Wilting  |  <5% Cessation"
+    )
 
     st.divider()
 
