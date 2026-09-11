@@ -285,6 +285,8 @@ _LOOKBACK_OPTIONS: dict[str, int] = {
     "7 Days": 7,
     "14 Days": 14,
     "30 Days": 30,
+    "3 Months": 90,
+    "12 Months": 365,
 }
 
 
@@ -448,7 +450,13 @@ def _render_historical_chart(plot: ForestPlot) -> None:
             fig,
             use_container_width=True,
             key=f"chart_{plot.id}",
-            config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
+            config={
+                "displayModeBar": True,
+                "modeBarButtonsToRemove": ['zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d', 'resetScale2d'],
+                "displaylogo": False,
+                "responsive": True,
+                "scrollZoom": False
+            },
         )
 
     except ImportError:
@@ -1214,11 +1222,11 @@ with tab_map:
     # Mapped from WUNDER PDF page 6 station labels to pixel coordinates.
     # GP-06 EXCLUDED (Water Potential station, not a VWC station).
     SENSOR_POSITIONS = {
-        "GP-01": {"x": 327, "y": 1060, "label": "GP-01", "sub": "F1-1 · ATMOS + VWC", "field": 1},
-        "GP-02": {"x": 100, "y": 800,  "label": "GP-02", "sub": "F1-2 · Soil Moisture", "field": 1},
-        "GP-03": {"x": 324, "y": 811,  "label": "GP-03", "sub": "F1-3 · Soil Moisture", "field": 1},
-        "GP-04": {"x": 513, "y": 568,  "label": "GP-04", "sub": "F2-1 · ATMOS + VWC", "field": 2},
-        "GP-05": {"x": 428, "y": 231,  "label": "GP-05", "sub": "F2-2 · Soil Moisture", "field": 2},
+        "GP-01": {"x": 372, "y": 1085, "label": "GP-01", "sub": "F1-1 · ATMOS + VWC", "field": 1},
+        "GP-02": {"x": 259, "y": 720,  "label": "GP-02", "sub": "F1-2 · Soil Moisture", "field": 1},
+        "GP-03": {"x": 369, "y": 836,  "label": "GP-03", "sub": "F1-3 · Soil Moisture", "field": 1},
+        "GP-04": {"x": 558, "y": 593,  "label": "GP-04", "sub": "F2-1 · ATMOS + VWC", "field": 2},
+        "GP-05": {"x": 473, "y": 256,  "label": "GP-05", "sub": "F2-2 · Soil Moisture", "field": 2},
     }
 
     # Image dimensions for coordinate mapping
@@ -1368,7 +1376,14 @@ with tab_map:
             fig,
             use_container_width=True,
             key="farm_map",
-            config={"displayModeBar": False, "responsive": True, "scrollZoom": False, "doubleClick": False},
+            config={
+                "displayModeBar": True,
+                "modeBarButtonsToRemove": ['zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d', 'resetScale2d'],
+                "displaylogo": False,
+                "responsive": True,
+                "scrollZoom": False,
+                "doubleClick": False
+            },
         )
 
     except ImportError:
