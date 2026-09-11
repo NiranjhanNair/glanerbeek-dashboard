@@ -1215,7 +1215,7 @@ with tab_map:
     # GP-06 EXCLUDED (Water Potential station, not a VWC station).
     SENSOR_POSITIONS = {
         "GP-01": {"x": 327, "y": 1060, "label": "GP-01", "sub": "F1-1 · ATMOS + VWC", "field": 1},
-        "GP-02": {"x": 214, "y": 695,  "label": "GP-02", "sub": "F1-2 · Soil Moisture", "field": 1},
+        "GP-02": {"x": 160, "y": 695,  "label": "GP-02", "sub": "F1-2 · Soil Moisture", "field": 1},
         "GP-03": {"x": 324, "y": 811,  "label": "GP-03", "sub": "F1-3 · Soil Moisture", "field": 1},
         "GP-04": {"x": 513, "y": 568,  "label": "GP-04", "sub": "F2-1 · ATMOS + VWC", "field": 2},
         "GP-05": {"x": 428, "y": 231,  "label": "GP-05", "sub": "F2-2 · Soil Moisture", "field": 2},
