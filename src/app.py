@@ -1336,7 +1336,7 @@ with tab_map:
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(family="Inter"),
-            dragmode="pan",  # set to pan so pinch-to-zoom works and taps don't trigger box zoom
+            dragmode=False,  # fix image in place (no 1-finger pan/zoom box)
             xaxis=dict(
                 range=[0, _IMG_W],
                 showgrid=False,
@@ -1368,7 +1368,7 @@ with tab_map:
             fig,
             use_container_width=True,
             key="farm_map",
-            config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
+            config={"displayModeBar": False, "responsive": True, "scrollZoom": False, "doubleClick": False},
         )
 
     except ImportError:
