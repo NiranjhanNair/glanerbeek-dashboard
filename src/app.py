@@ -455,7 +455,14 @@ def _render_historical_chart(plot: ForestPlot) -> None:
                 "modeBarButtonsToRemove": ['zoom2d', 'pan2d', 'select2d', 'lasso2d', 'zoomIn2d', 'zoomOut2d', 'autoScale2d', 'resetScale2d'],
                 "displaylogo": False,
                 "responsive": True,
-                "scrollZoom": False
+                "scrollZoom": False,
+                "toImageButtonOptions": {
+                    "format": "png",
+                    "filename": f"glanerbeek_{plot.id}_history",
+                    "height": 800,
+                    "width": 1200,
+                    "scale": 3
+                }
             },
         )
 
@@ -1222,11 +1229,11 @@ with tab_map:
     # Mapped from WUNDER PDF page 6 station labels to pixel coordinates.
     # GP-06 EXCLUDED (Water Potential station, not a VWC station).
     SENSOR_POSITIONS = {
-        "GP-01": {"x": 372, "y": 1085, "label": "GP-01", "sub": "F1-1 · ATMOS + VWC", "field": 1},
-        "GP-02": {"x": 259, "y": 720,  "label": "GP-02", "sub": "F1-2 · Soil Moisture", "field": 1},
-        "GP-03": {"x": 369, "y": 836,  "label": "GP-03", "sub": "F1-3 · Soil Moisture", "field": 1},
-        "GP-04": {"x": 558, "y": 593,  "label": "GP-04", "sub": "F2-1 · ATMOS + VWC", "field": 2},
-        "GP-05": {"x": 473, "y": 256,  "label": "GP-05", "sub": "F2-2 · Soil Moisture", "field": 2},
+        "GP-01": {"x": 544, "y": 1025, "label": "GP-01", "sub": "F1-1 · ATMOS + VWC", "field": 1},
+        "GP-02": {"x": 247, "y": 697,  "label": "GP-02", "sub": "F1-2 · Soil Moisture", "field": 1},
+        "GP-03": {"x": 528, "y": 769,  "label": "GP-03", "sub": "F1-3 · Soil Moisture", "field": 1},
+        "GP-04": {"x": 730, "y": 585,  "label": "GP-04", "sub": "F2-1 · ATMOS + VWC", "field": 2},
+        "GP-05": {"x": 577, "y": 280,  "label": "GP-05", "sub": "F2-2 · Soil Moisture", "field": 2},
     }
 
     # Image dimensions for coordinate mapping
@@ -1382,7 +1389,14 @@ with tab_map:
                 "displaylogo": False,
                 "responsive": True,
                 "scrollZoom": False,
-                "doubleClick": False
+                "doubleClick": False,
+                "toImageButtonOptions": {
+                    "format": "png",
+                    "filename": "glanerbeek_farm_map",
+                    "height": 1315,
+                    "width": 1200,
+                    "scale": 2
+                }
             },
         )
 
