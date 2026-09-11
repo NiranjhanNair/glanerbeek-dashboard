@@ -1107,6 +1107,13 @@ st.markdown(
             flex: 100% !important;
             min-width: 100% !important;
         }}
+
+        /* Allow vertical page scrolling over Plotly charts on mobile */
+        .js-plotly-plot .plotly .drag,
+        .js-plotly-plot .plotly .nsewdrag,
+        .js-plotly-plot .plotly .main-svg {{
+            touch-action: pan-y !important;
+        }}
     }}
     }}
     </style>
@@ -1218,7 +1225,7 @@ with tab_map:
     _IMG_W, _IMG_H = 1200, 1315
 
     DEPTH_ORDER = ["40 cm", "20 cm", "10 cm", "5 cm"]  # outer to inner
-    RING_SIZES = [54, 38, 26, 16]  # marker sizes for concentric rings
+    RING_SIZES = [70, 52, 36, 22]  # marker sizes for concentric rings (larger for mobile tap targets)
 
     def _vwc_to_color(vwc: float) -> str:
         """Map VWC percentage to a color on a continuous gradient."""
@@ -1317,7 +1324,7 @@ with tab_map:
 
         # Depth ring legend text
         fig.add_annotation(
-            x=_IMG_W / 2, y=-75,
+            x=_IMG_W / 2, y=-95,
             text="Concentric ring depths: outer = 40 cm → inner = 5 cm",
             showarrow=False,
             font=dict(size=9.5, color="#6b7280" if dark_mode else "#64748b"),
@@ -1325,24 +1332,25 @@ with tab_map:
 
         fig.update_layout(
             height=680,
-            margin=dict(l=5, r=5, t=5, b=95),
+            margin=dict(l=5, r=5, t=5, b=115),
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(family="Inter"),
+            dragmode=False,  # disable single-finger drag so page scroll works on mobile
             xaxis=dict(
                 range=[0, _IMG_W],
                 showgrid=False,
                 zeroline=False,
                 showticklabels=False,
-                fixedrange=True,
+                fixedrange=False,  # allow pinch-to-zoom on mobile
             ),
             yaxis=dict(
-                range=[-100, _IMG_H],
+                range=[-120, _IMG_H],
                 showgrid=False,
                 zeroline=False,
                 showticklabels=False,
                 scaleanchor="x",
-                fixedrange=True,
+                fixedrange=False,  # allow pinch-to-zoom on mobile
             ),
             images=[dict(
                 source=f"data:image/png;base64,{_sat_b64}",
