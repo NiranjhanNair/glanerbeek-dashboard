@@ -1,19 +1,16 @@
 """
-Glanerbeek Dashboard -- Live Sensor Integration
-================================================
+Glanerbeek Dashboard V3 — Live Sensor Decision-Support
+=======================================================
 A Streamlit dashboard that fetches live soil-moisture data from
 MajiSys (ITC, University of Twente) sensor stations and renders
 ecological risk alerts for the Glanerbeek food forest.
 
-Domain context  (sandy-loam baseline, from context.md S3):
-  - 5-color ecological risk framework:
-      1 = Green  (Optimal)              VWC >= 17 %
-      2 = Yellow (Microbial Stress)     VWC 13-17 %  triggers 48 h labor window
-      3 = Orange (Severe Stress)        VWC 9-13 %
-      4 = Red    (Plant Wilting)        VWC 5-9 %   (permanent wilting point)
-      5 = Black  (Ecosystem Cessation)  VWC < 5 %
+Thesis thresholds (sandy-loam baseline):
+  - 3-level classification:
+      Green  (Optimal)              VWC > 17 %
+      Yellow (Irrigation Trigger)   9 % < VWC <= 17 %   (plan irrigation)
+      Red    (Critical)             VWC <= 9 %           (permanent wilting point)
   - Worst-case conservative aggregation: minimum VWC from top 40 cm.
-  - Spatial Priority Score (1-5) ranks forest plots by urgency.
   - VWC = Volumetric Water Content (%) from soil-moisture sensors.
 
 Run:  streamlit run src/app.py
@@ -55,51 +52,66 @@ _requests.get = _get_with_timeout
 # ----------------------------------------------
 st.set_page_config(
     page_title="Glanerbeek Dashboard",
-    page_icon="G",
+    page_icon="🌳",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 # ----------------------------------------------
-# 1. CONSTANTS
+# SIDEBAR SETTINGS
+# ----------------------------------------------
+st.sidebar.markdown("### Appearance")
+dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=False)
+
+# ----------------------------------------------
+# 1. CONSTANTS — 3-level risk (thesis-aligned)
 # ----------------------------------------------
 
 RISK_PALETTE: dict[int, dict] = {
-    1: {"label": "Optimal",              "color": "#22c55e", "bg": "#052e16", "text_color": "#bbf7d0"},
-    2: {"label": "Microbial Stress",     "color": "#eab308", "bg": "#422006", "text_color": "#fef08a"},
-    3: {"label": "Severe Stress",        "color": "#f97316", "bg": "#431407", "text_color": "#fed7aa"},
-    4: {"label": "Plant Wilting",        "color": "#ef4444", "bg": "#450a0a", "text_color": "#fecaca"},
-    5: {"label": "Ecosystem Cessation",  "color": "#1f2937", "bg": "#030712", "text_color": "#9ca3af"},
+    1: {"label": "Optimal",              "color": "#16a34a", "bg": "#f0fdf4", "text_color": "#14532d",
+        "emoji": "🟢", "action": "No action required"},
+    2: {"label": "Irrigation Trigger",   "color": "#ca8a04", "bg": "#fefce8", "text_color": "#713f12",
+        "emoji": "🟡", "action": "Plan irrigation within 48 hours"},
+    3: {"label": "Critical",             "color": "#dc2626", "bg": "#fef2f2", "text_color": "#7f1d1d",
+        "emoji": "🔴", "action": "Immediate intervention required"},
 }
 
-# VWC thresholds -- Source: context.md S3, Sandy Loam Baseline
-#   Yellow (Microbial Stress) triggers at 17 % VWC  (-60 kPa)
-#   Red    (Plant Wilting)    triggers at  9 % VWC  (permanent wilting point)
+# VWC thresholds — 3 levels matching thesis (Sandy Loam Baseline)
+#   17 % = Irrigation Trigger (50% depletion of plant-available water)
+#    9 % = Permanent Wilting Point (critical biological failure)
 VWC_THRESHOLDS: list[tuple[float, int]] = [
-    (17.0, 1),   # >= 17 % -> Green  (Optimal)
-    (13.0, 2),   # >= 13 % -> Yellow (Microbial Stress) -- 48 h alert trigger
-    (9.0,  3),   # >=  9 % -> Orange (Severe Stress)
-    (5.0,  4),   # >=  5 % -> Red    (Plant Wilting)
-    (0.0,  5),   # <   5 % -> Black  (Ecosystem Cessation)
+    (17.0, 1),   # > 17 % -> Green  (Optimal)
+    (9.0,  2),   # > 9 %  -> Yellow (Irrigation Trigger)
+    (0.0,  3),   # <= 9 % -> Red    (Critical / PWP)
 ]
 
-# Logger-to-plot mapping (sequential, as specified by user)
+# Logger-to-plot mapping
+# 5 soil-moisture stations confirmed by WUNDER / Jessica / Yijian.
+# GP-06 (z6-30173, F2_3_WP_SMST) EXCLUDED — it is a Water-Potential
+# (Matric Potential) station using TEROS 21 sensors, NOT a VWC station.
 PLOT_DEFINITIONS: list[dict] = [
-    {"id": "GP-01", "name": "Field 1 - Station 1 (ATMOS)", "area_ha": 2.4,
+    {"id": "GP-01", "name": "F1-1 (ATMOS + Soil Moisture)", "area_ha": 2.4,
      "logger_id": "z6-21176", "logger_name": "F1_1_ATMOS_SMST1", "field": 1},
-    {"id": "GP-02", "name": "Field 1 - Station 2",        "area_ha": 1.8,
+    {"id": "GP-02", "name": "F1-2 (Soil Moisture)",         "area_ha": 1.8,
      "logger_id": "z6-21178", "logger_name": "F1_2_SMST2",       "field": 1},
-    {"id": "GP-03", "name": "Field 1 - Station 3",        "area_ha": 3.1,
+    {"id": "GP-03", "name": "F1-3 (Soil Moisture)",         "area_ha": 3.1,
      "logger_id": "z6-25928", "logger_name": "F1_3_SMST3",       "field": 1},
-    {"id": "GP-04", "name": "Field 2 - Station 1 (ATMOS)", "area_ha": 2.0,
+    {"id": "GP-04", "name": "F2-1 (ATMOS + Soil Moisture)", "area_ha": 2.0,
      "logger_id": "z6-21177", "logger_name": "F2_1_ATMOS_SMST1", "field": 2},
-    {"id": "GP-05", "name": "Field 2 - Station 2",        "area_ha": 1.5,
+    {"id": "GP-05", "name": "F2-2 (Soil Moisture)",         "area_ha": 1.5,
      "logger_id": "z6-21179", "logger_name": "F2_2_SMST2",       "field": 2},
-    {"id": "GP-06", "name": "Field 2 - Station 3 (WP)",   "area_ha": 2.7,
-     "logger_id": "z6-30173", "logger_name": "F2_3_WP_SMST",     "field": 2},
 ]
 
 MAX_DEPTH_CM = 40.0  # Worst-case conservative: only top 40 cm sensors
+
+# Depth colors for chart lines (consistent across all charts)
+DEPTH_COLORS = {
+    "5 cm": "#60a5fa",    # blue
+    "10 cm": "#34d399",   # green
+    "20 cm": "#fbbf24",   # amber
+    "40 cm": "#f87171",   # red
+    "80 cm": "#a78bfa",   # purple
+}
 
 
 # ----------------------------------------------
@@ -112,6 +124,13 @@ def _get_cache_time_key() -> str:
     minutes = (now.minute // 15) * 15
     rounded = now.replace(minute=minutes, second=0, microsecond=0)
     return rounded.strftime("%Y-%m-%d %H:%M")
+
+
+def _get_historical_cache_key() -> str:
+    """Round current time to nearest hour for historical data cache-key."""
+    now = _dt.datetime.now()
+    rounded = now.replace(minute=0, second=0, microsecond=0)
+    return rounded.strftime("%Y-%m-%d %H:00")
 
 
 def _extract_worst_case_vwc(df: pd.DataFrame) -> float | None:
@@ -151,15 +170,39 @@ def _extract_worst_case_vwc(df: pd.DataFrame) -> float | None:
     return round(float(min_vwc_fraction) * 100.0, 2)
 
 
-@st.cache_data(ttl=900, show_spinner="Fetching live sensor data from MajiSys...")
-def fetch_live_data(time_key: str) -> tuple[dict[str, float], bool]:
+def _extract_per_depth_vwc(df: pd.DataFrame) -> dict[str, float]:
+    """
+    Extract the latest VWC reading per depth from a sensor DataFrame.
+
+    Returns a dict mapping depth label (e.g. '5 cm') -> VWC percentage.
+    """
+    if df is None or df.empty:
+        return {}
+
+    result = {}
+    for col in df.columns:
+        try:
+            depth_str = col.split()[-1]
+            depth_val = float(depth_str.replace("cm", ""))
+            label = f"{depth_val:.0f} cm"
+            latest_val = df[col].iloc[-1]
+            if not pd.isna(latest_val):
+                result[label] = round(float(latest_val) * 100.0, 2)
+        except (ValueError, IndexError):
+            continue
+    return result
+
+
+@st.cache_data(ttl=900, show_spinner="Fetching live sensor data…")
+def fetch_live_data(time_key: str) -> tuple[dict[str, float], dict[str, dict[str, float]], bool]:
     """
     Fetch the latest 24 h of VWC readings from all Glanerbeek stations.
 
     Returns
     -------
-    (data_dict, success)
-        data_dict maps logger_id (str) -> worst-case VWC % (float).
+    (worst_case_dict, per_depth_dict, success)
+        worst_case_dict maps logger_id -> worst-case VWC %.
+        per_depth_dict maps logger_id -> {depth_label: VWC %}.
         success is False when the server could not be reached.
     """
     try:
@@ -169,119 +212,267 @@ def fetch_live_data(time_key: str) -> tuple[dict[str, float], bool]:
         maxdate = _dt.datetime.now()
         mindate = maxdate - _dt.timedelta(hours=24)
 
-        # 1. Download raw CSV from each logger
         raw = msu.downloadTimeseries(loggers, mindate, maxdate)
-
-        # 2. Group by parameter (only Soil moisture needed)
         grouped = msu.groupByParameter(raw, ["Soil moisture"], loggers)
-
-        # 3. Convert to Pandas DataFrames
         pandas_data = msu.toPandas(grouped)
 
-        # 4. Extract worst-case VWC per logger
-        results: dict[str, float] = {}
+        worst_results: dict[str, float] = {}
+        depth_results: dict[str, dict[str, float]] = {}
+
         if "Soil moisture" in pandas_data:
             for logger_tuple, _unit, df in pandas_data["Soil moisture"]:
                 logger_id = logger_tuple[0]
                 vwc_pct = _extract_worst_case_vwc(df)
                 if vwc_pct is not None:
-                    results[logger_id] = vwc_pct
+                    worst_results[logger_id] = vwc_pct
+                depth_results[logger_id] = _extract_per_depth_vwc(df)
 
-        return results, True
+        return worst_results, depth_results, True
 
     except Exception:
-        return {}, False
+        return {}, {}, False
 
 
-@st.cache_data(ttl=900, show_spinner="Fetching audit data...")
-def fetch_raw_audit_data(time_key: str) -> tuple[dict, dict, dict, bool]:
+@st.cache_data(ttl=3600, show_spinner="Fetching historical sensor data…")
+def fetch_historical_data(
+    time_key: str, logger_id: str, logger_name: str, days: int = 7,
+) -> tuple[pd.DataFrame | None, bool]:
     """
-    Fetch pipeline data at each stage for the Data Pipeline Audit tab.
+    Fetch *days* days of soil-moisture data for a single logger.
 
-    Returns
-    -------
-    (raw_csvs, cleaned_dfs, filtered_results, success)
-        raw_csvs:          logger_id (str) -> raw CSV text
-        cleaned_dfs:       logger_id (str) -> full cleaned Pandas DataFrame
-        filtered_results:  logger_id (str) -> {top_40cm_df, min_vwc_pct, columns_info}
-        success:           False when the server could not be reached.
+    Returns the full DataFrame (ALL depth columns, including > 40 cm)
+    for historical charting only.  This data is **never** used for alerts.
     """
     try:
-        loggers = [
-            (p["logger_id"], p["logger_name"]) for p in PLOT_DEFINITIONS
-        ]
+        logger_tuple = (logger_id, logger_name)
         maxdate = _dt.datetime.now()
-        mindate = maxdate - _dt.timedelta(hours=24)
+        mindate = maxdate - _dt.timedelta(days=days)
 
-        # Stage 1: Raw CSV from each logger
-        raw = msu.downloadTimeseries(loggers, mindate, maxdate)
-        raw_csvs: dict[str, str] = {}
-        for logger_tuple in loggers:
-            if logger_tuple in raw:
-                raw_csvs[logger_tuple[0]] = raw[logger_tuple]
-
-        # Stage 2: Group & convert to Pandas DataFrames
-        grouped = msu.groupByParameter(raw, ["Soil moisture"], loggers)
+        raw = msu.downloadTimeseries([logger_tuple], mindate, maxdate)
+        grouped = msu.groupByParameter(raw, ["Soil moisture"], [logger_tuple])
         pandas_data = msu.toPandas(grouped)
 
-        cleaned_dfs: dict[str, pd.DataFrame] = {}
-        filtered_results: dict[str, dict] = {}
-
         if "Soil moisture" in pandas_data:
-            for logger_tuple, unit, df in pandas_data["Soil moisture"]:
-                logger_id = logger_tuple[0]
-                if df is not None and not df.empty:
-                    cleaned_dfs[logger_id] = df
+            for lt, _unit, df in pandas_data["Soil moisture"]:
+                if lt[0] == logger_id and df is not None and not df.empty:
+                    return df, True
 
-                    # Stage 3: 40 cm depth filter
-                    top_cols: list[str] = []
-                    all_cols_info: list[dict] = []
-                    for col in df.columns:
-                        try:
-                            depth_str = col.split()[-1]
-                            depth_val = float(depth_str.replace("cm", ""))
-                            included = depth_val <= MAX_DEPTH_CM
-                            all_cols_info.append({
-                                "column": col,
-                                "depth_cm": depth_val,
-                                "included": included,
-                            })
-                            if included:
-                                top_cols.append(col)
-                        except (ValueError, IndexError):
-                            continue
-
-                    if top_cols:
-                        top_df = df[top_cols]
-                        latest_row = top_df.iloc[-1]
-                        min_frac = latest_row.min()
-                        min_pct = (
-                            round(float(min_frac) * 100.0, 2)
-                            if not pd.isna(min_frac)
-                            else None
-                        )
-                        filtered_results[logger_id] = {
-                            "top_40cm_df": top_df,
-                            "min_vwc_pct": min_pct,
-                            "columns_info": all_cols_info,
-                        }
-
-        return raw_csvs, cleaned_dfs, filtered_results, True
+        return None, True  # no data but no error
 
     except Exception:
-        return {}, {}, {}, False
+        return None, False
+
+
+def _parse_depth_columns(df: pd.DataFrame) -> list[tuple[float, str]]:
+    """
+    Parse and sort depth columns from a soil-moisture DataFrame.
+    Returns a list of ``(depth_cm, column_name)`` tuples, sorted shallowest-first.
+    """
+    depth_cols: list[tuple[float, str]] = []
+    for col in df.columns:
+        try:
+            depth_str = col.split()[-1]
+            depth_val = float(depth_str.replace("cm", ""))
+            depth_cols.append((depth_val, col))
+        except (ValueError, IndexError):
+            continue
+    depth_cols.sort(key=lambda x: x[0])
+    return depth_cols
+
+
+# Lookback options for the historical timeframe toggle
+_LOOKBACK_OPTIONS: dict[str, int] = {
+    "7 Days": 7,
+    "14 Days": 14,
+    "30 Days": 30,
+}
+
+
+def _render_historical_chart(plot: ForestPlot) -> None:
+    """Render a VWC trend chart with colored background threshold bands."""
+
+    # ---- Timeframe toggle ----
+    lookback_label = st.radio(
+        "Lookback period",
+        options=list(_LOOKBACK_OPTIONS.keys()),
+        index=2,  # default to 30 days
+        horizontal=True,
+        key=f"lookback_{plot.id}",
+    )
+    lookback_days = _LOOKBACK_OPTIONS[lookback_label]
+
+    hist_key = _get_historical_cache_key()
+    df, success = fetch_historical_data(
+        hist_key, plot.logger_id, plot.logger_name, days=lookback_days,
+    )
+
+    if not success:
+        st.error("Could not fetch historical data from MajiSys.")
+        return
+    if df is None or df.empty:
+        st.info(
+            f"No historical data returned for the last {lookback_days} days."
+        )
+        return
+
+    depth_cols = _parse_depth_columns(df)
+    if not depth_cols:
+        st.info("No depth sensors found in the data.")
+        return
+
+    # ---- Depth selector (multiselect) ----
+    depth_labels = [f"{d:.0f} cm" for d, _ in depth_cols]
+    # Default: show top 40cm sensors only
+    defaults = [lbl for d, _ in depth_cols for lbl in [f"{d:.0f} cm"] if d <= MAX_DEPTH_CM]
+    if not defaults:
+        defaults = [depth_labels[0]]
+
+    selected = st.multiselect(
+        "Select sensor depths to view",
+        options=depth_labels,
+        default=defaults,
+        key=f"depth_sel_{plot.id}",
+    )
+
+    if not selected:
+        st.info("Select at least one sensor depth to view the chart.")
+        return
+
+    # ---- Build chart DataFrame from selected depths ----
+    depth_map = {f"{d:.0f} cm": col for d, col in depth_cols}
+    chart_data: dict[str, pd.Series] = {}
+    for label in selected:
+        chart_data[label] = df[depth_map[label]] * 100.0
+
+    chart_df = pd.DataFrame(chart_data, index=df.index)
+    chart_df.index = pd.to_datetime(chart_df.index)
+    chart_df.index.name = "Timestamp"
+    chart_df = chart_df.dropna(how="all")
+
+    # Resample to daily averages (temporal aggregation)
+    chart_df = chart_df.resample('1D').mean()
+    chart_df = chart_df.sort_index()
+    # Format dates without year (e.g. "01 Jun")
+    chart_df.index = chart_df.index.strftime('%d %b')
+    chart_df = chart_df.dropna(how="all")
+
+    if chart_df.empty:
+        st.info("No valid data for the selected depths and timeframe.")
+        return
+
+    # ---- Render with Plotly for gradient background bands ----
+    try:
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+
+        # Get y-axis range
+        y_min = max(0, chart_df.min().min() - 2)
+        y_max = min(60, chart_df.max().max() + 3)
+
+        # Add colored background bands (threshold zones)
+        # Red zone: 0 to 9%
+        fig.add_hrect(
+            y0=0, y1=9,
+            fillcolor="rgba(239, 68, 68, 0.12)",
+            line_width=0,
+            annotation_text="Critical (<9%)",
+            annotation_position="bottom left",
+            annotation_font=dict(size=10, color="rgba(239, 68, 68, 0.5)"),
+        )
+        # Yellow zone: 9% to 17%
+        fig.add_hrect(
+            y0=9, y1=17,
+            fillcolor="rgba(234, 179, 8, 0.10)",
+            line_width=0,
+            annotation_text="Irrigation Trigger (9–17%)",
+            annotation_position="bottom left",
+            annotation_font=dict(size=10, color="rgba(234, 179, 8, 0.5)"),
+        )
+        # Green zone: above 17%
+        fig.add_hrect(
+            y0=17, y1=y_max + 5,
+            fillcolor="rgba(34, 197, 94, 0.08)",
+            line_width=0,
+            annotation_text="Optimal (>17%)",
+            annotation_position="bottom left",
+            annotation_font=dict(size=10, color="rgba(34, 197, 94, 0.4)"),
+        )
+
+        # Add data lines for each depth
+        for col in chart_df.columns:
+            color = DEPTH_COLORS.get(col, "#94a3b8")
+            fig.add_trace(go.Scatter(
+                x=chart_df.index,
+                y=chart_df[col],
+                mode='lines+markers',
+                name=col,
+                line=dict(color=color, width=2.5),
+                marker=dict(size=4, color=color),
+                hovertemplate=f'{col}<br>%{{x}}<br>VWC: %{{y:.1f}}%<extra></extra>',
+            ))
+
+        fig.update_layout(
+            height=340,
+            margin=dict(l=10, r=10, t=30, b=10),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(11,15,25,1)' if dark_mode else '#ffffff',
+            font=dict(family="Inter", color="#cbd5e1" if dark_mode else "#334155"),
+            xaxis=dict(
+                gridcolor='rgba(255,255,255,0.06)' if dark_mode else '#e2e8f0',
+                tickfont=dict(size=10, color="#cbd5e1" if dark_mode else "#64748b"),
+                nticks=5,
+                tickangle=0,
+                fixedrange=True,
+            ),
+            yaxis=dict(
+                title="VWC (%)",
+                title_font=dict(size=11, color="#cbd5e1" if dark_mode else "#475569"),
+                gridcolor='rgba(255,255,255,0.06)' if dark_mode else '#e2e8f0',
+                range=[y_min, y_max],
+                tickfont=dict(size=10, color="#cbd5e1" if dark_mode else "#64748b"),
+                fixedrange=True,
+            ),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="left",
+                x=0,
+                font=dict(size=11, color="#f1f5f9" if dark_mode else "#1e293b"),
+            ),
+            hovermode="x unified",
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=f"chart_{plot.id}",
+            config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
+        )
+
+    except ImportError:
+        # Fallback to Streamlit native chart if plotly not installed
+        st.line_chart(chart_df, height=360)
+
+    st.caption(
+        "Colored bands: 🟢 >17% Optimal  |  🟡 9–17% Irrigation Trigger  |  "
+        "🔴 <9% Critical (PWP).  "
+        "Dashboard alerts use only the top 40 cm (worst-case conservative); "
+        "deeper sensors are shown for visual context only."
+    )
 
 
 # ----------------------------------------------
-# 3. DOMAIN HELPERS
+# 3. DOMAIN HELPERS — 3-level risk
 # ----------------------------------------------
 
 def vwc_to_risk(vwc: float) -> int:
-    """Convert a VWC percentage to a 1-5 risk level."""
+    """Convert a VWC percentage to a 1-3 risk level."""
     for threshold, level in VWC_THRESHOLDS:
         if vwc >= threshold:
             return level
-    return 5
+    return 3
 
 
 @dataclass
@@ -297,22 +488,18 @@ class ForestPlot:
     vwc: float = 30.0
     spatial_priority: int = 1
     risk_level: int = 1
-    yellow_entry_time: _dt.datetime | None = None
+    per_depth_vwc: dict = None  # depth_label -> VWC %
 
-    def update(self, vwc: float, now: _dt.datetime) -> None:
+    def __post_init__(self):
+        if self.per_depth_vwc is None:
+            self.per_depth_vwc = {}
+
+    def update(self, vwc: float, per_depth: dict[str, float] | None = None) -> None:
         self.vwc = vwc
-        new_risk = vwc_to_risk(vwc)
-
-        # Track when a zone first enters Yellow (level 2) for the 48 h window
-        if new_risk == 2 and self.risk_level != 2:
-            self.yellow_entry_time = now
-        elif new_risk != 2:
-            self.yellow_entry_time = None
-
-        self.risk_level = new_risk
-        # Spatial priority mirrors risk for the prototype;
-        # in production this would incorporate additional spatial analytics.
-        self.spatial_priority = new_risk
+        self.risk_level = vwc_to_risk(vwc)
+        self.spatial_priority = self.risk_level
+        if per_depth is not None:
+            self.per_depth_vwc = per_depth
 
 
 def overall_risk(plots: list[ForestPlot]) -> int:
@@ -320,19 +507,6 @@ def overall_risk(plots: list[ForestPlot]) -> int:
     if not plots:
         return 1
     return max(p.risk_level for p in plots)
-
-
-def remaining_48h(
-    entry: _dt.datetime | None, now: _dt.datetime
-) -> _dt.timedelta | None:
-    """Time left in the 48-hour labor coordination window."""
-    if entry is None:
-        return None
-    deadline = entry + _dt.timedelta(hours=48)
-    remaining = deadline - now
-    if remaining.total_seconds() <= 0:
-        return _dt.timedelta(0)
-    return remaining
 
 
 # ----------------------------------------------
@@ -355,6 +529,8 @@ def _init_state() -> None:
         ]
     if "last_live_data" not in st.session_state:
         st.session_state.last_live_data = {}
+    if "last_depth_data" not in st.session_state:
+        st.session_state.last_depth_data = {}
     if "connection_ok" not in st.session_state:
         st.session_state.connection_ok = True
 
@@ -365,79 +541,354 @@ _init_state()
 # ----------------------------------------------
 # 5. INJECT CUSTOM CSS
 # ----------------------------------------------
-st.markdown(
-    """
-    <style>
-    /* ---- Google Font ---- */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+light_css = """
+    /* ---- global page bg (WHITE per Jessica's feedback) ---- */
+    .stApp { background: #f8fafc; }
 
+    /* ---- risk banner ---- */
+    .risk-banner {
+        border-radius: 14px;
+        padding: 1rem 1.4rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.8rem;
+        margin-bottom: 0.75rem;
+        box-shadow: 0 2px 12px rgba(0,0,0,.10);
+        transition: background 0.4s ease;
+    }
+    .risk-banner-left h1 {
+        margin: 0;
+        font-size: 1.35rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        line-height: 1.25;
+    }
+    .risk-banner-left .subtitle {
+        font-size: 0.85rem;
+        opacity: 0.85;
+        margin-top: 3px;
+    }
+    .risk-banner-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        border-radius: 9999px;
+        flex-shrink: 0;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    }
+    .risk-banner-badge .badge-emoji {
+        font-size: 1.25rem;
+        line-height: 1;
+    }
+    .risk-banner-badge .badge-text {
+        font-weight: 800;
+        font-size: 0.92rem;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+
+    /* ---- zone cards ---- */
+    .zone-card {
+        background: #ffffff;
+        border-radius: 14px;
+        padding: 1rem 1.3rem;
+        margin-bottom: 0.6rem;
+        border-left: 4px solid;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        transition: background 0.25s ease, transform 0.15s ease;
+    }
+    .zone-card:hover {
+        background: #f1f5f9;
+    }
+    .zone-card .zone-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+    .zone-card .zone-name {
+        font-weight: 700;
+        font-size: 1rem;
+        color: #1e293b;
+    }
+    .zone-card .zone-meta {
+        font-size: 0.78rem;
+        color: #64748b;
+        margin-top: 2px;
+    }
+    .zone-card .vwc-big {
+        font-size: 1.45rem;
+        font-weight: 800;
+        line-height: 1;
+        margin-top: 0.3rem;
+        font-variant-numeric: tabular-nums;
+    }
+    .zone-card .zone-action {
+        font-size: 0.82rem;
+        font-weight: 600;
+        margin-top: 0.5rem;
+        display: inline-block;
+        padding: 0.35rem 0.7rem;
+        border-radius: 6px;
+    }
+
+    /* ---- typography tweaks ---- */
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #1e293b;
+        margin-bottom: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    /* ---- priority table ---- */
+    .table-scroll-wrapper {
+        overflow-x: auto;
+        border-radius: 12px;
+        margin-bottom: 1rem;
+    }
+    .plot-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0 4px;
+    }
+    .plot-table th {
+        text-align: left;
+        padding: 0.5rem 0.8rem;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        border-bottom: 1px solid #e2e8f0;
+        white-space: nowrap;
+    }
+    .plot-table td {
+        padding: 0.65rem 0.8rem;
+        font-size: 0.88rem;
+        color: #334155;
+    }
+    .plot-table tr.data-row {
+        background: #ffffff;
+        border-radius: 10px;
+        transition: background 0.25s ease;
+    }
+    .plot-table tr.data-row:hover {
+        background: #f1f5f9;
+    }
+    .plot-table tr.data-row td:first-child { border-radius: 10px 0 0 10px; }
+    .plot-table tr.data-row td:last-child  { border-radius: 0 10px 10px 0; }
+
+    .risk-dot {
+        display: inline-block;
+        width: 10px; height: 10px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+    .priority-badge {
+        display: inline-flex;
+        align-items: center; justify-content: center;
+        width: 28px; height: 28px;
+        border-radius: 50%;
+        font-weight: 800;
+        font-size: 0.85rem;
+    }
+    .mode-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.70rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        background: rgba(220,38,38,0.10);
+        color: #dc2626;
+        border: 1px solid rgba(220,38,38,0.25);
+    }
+    .mode-badge::before {
+        content: '';
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: #dc2626;
+        animation: pulse-dot 1.5s infinite;
+    }
+    @keyframes pulse-dot {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
+    }
+
+    /* ---- sidebar ---- */
+    section[data-testid="stSidebar"] {
+        background: #f1f5f9 !important;
+    }
+
+    /* High contrast text for outdoor sunlight */
+    .stCaption, [data-testid="stCaptionContainer"] {
+        color: #64748b !important;
+        font-size: 0.82rem !important;
+    }
+    [data-testid="stWidgetLabel"] p,
+    .stRadio label,
+    .stMultiSelect label,
+    div[data-testid="stRadio"] p {
+        color: #334155 !important;
+        font-weight: 500 !important;
+    }
+    .stRadio label span, .stRadio div[role="radiogroup"] label div {
+        color: #475569 !important;
+    }
+
+    [data-testid="stExpander"] {
+        border-radius: 10px !important;
+        border: 1px solid #e2e8f0 !important;
+        background: #ffffff !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stExpander"] summary {
+        color: #1e293b !important;
+        background: #f8fafc !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stExpander"] summary:hover,
+    [data-testid="stExpander"] summary:focus,
+    [data-testid="stExpander"] summary:active {
+        background: #f1f5f9 !important;
+        color: #0f172a !important;
+    }
+    details[data-testid="stExpander"][open] summary {
+        background: #f1f5f9 !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+        color: #2563eb !important;
+    }
+    [data-testid="stExpanderDetails"] {
+        background: #ffffff !important;
+        padding: 0.75rem 0.6rem !important;
+    }
+"""
+
+dark_css = """
     /* ---- global page bg ---- */
     .stApp { background: #0b0f19; }
 
     /* ---- risk banner ---- */
     .risk-banner {
-        border-radius: 16px;
-        padding: 1.6rem 2rem;
+        border-radius: 14px;
+        padding: 1rem 1.4rem;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 1rem;
-        margin-bottom: 0.5rem;
-        box-shadow: 0 4px 24px rgba(0,0,0,.4);
-        transition: background 0.5s ease;
-        flex-wrap: wrap;
+        gap: 0.8rem;
+        margin-bottom: 0.75rem;
+        box-shadow: 0 4px 20px rgba(0,0,0,.35);
+        transition: background 0.4s ease;
     }
-    .risk-banner h1 {
+    .risk-banner-left h1 {
         margin: 0;
-        font-size: 1.6rem;
+        font-size: 1.35rem;
         font-weight: 800;
         letter-spacing: -0.02em;
+        line-height: 1.25;
     }
-    .risk-banner .subtitle {
-        font-size: 0.95rem;
-        opacity: 0.8;
+    .risk-banner-left .subtitle {
+        font-size: 0.85rem;
+        opacity: 0.85;
+        margin-top: 3px;
+        color: #cbd5e1 !important;
+    }
+    .risk-banner-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 16px;
+        border-radius: 9999px;
+        flex-shrink: 0;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    }
+    .risk-banner-badge .badge-emoji {
+        font-size: 1.25rem;
+        line-height: 1;
+    }
+    .risk-banner-badge .badge-text {
+        font-weight: 800;
+        font-size: 0.92rem;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+
+    /* ---- zone cards ---- */
+    .zone-card {
+        background: rgba(255,255,255,0.03);
+        border-radius: 14px;
+        padding: 1rem 1.3rem;
+        margin-bottom: 0.6rem;
+        border-left: 4px solid;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        transition: background 0.25s ease, transform 0.15s ease;
+    }
+    .zone-card:hover {
+        background: rgba(255,255,255,0.06);
+    }
+    .zone-card .zone-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+    .zone-card .zone-name {
+        font-weight: 700;
+        font-size: 1rem;
+        color: #e5e7eb;
+    }
+    .zone-card .zone-meta {
+        font-size: 0.78rem;
+        color: #94a3b8;
         margin-top: 2px;
     }
-
-    /* ---- action center ---- */
-    .action-center {
-        border-radius: 14px;
-        padding: 1.2rem 1.4rem;
-        margin-bottom: 1.2rem;
-        border: 1px solid rgba(255,255,255,0.06);
-        background: rgba(255,255,255,0.02);
+    .zone-card .vwc-big {
+        font-size: 1.45rem;
+        font-weight: 800;
+        line-height: 1;
+        margin-top: 0.3rem;
+        font-variant-numeric: tabular-nums;
     }
-    .action-center .section-title {
-        margin-bottom: 0.8rem;
-    }
-    .action-clear {
-        color: #6b7280;
-        font-size: 0.9rem;
-        padding: 0.8rem 1rem;
-        text-align: center;
-        border: 1px dashed rgba(255,255,255,0.08);
-        border-radius: 12px;
+    .zone-card .zone-action {
+        font-size: 0.82rem;
+        font-weight: 600;
+        margin-top: 0.5rem;
+        display: inline-block;
+        padding: 0.35rem 0.7rem;
+        border-radius: 6px;
     }
 
+    /* ---- typography tweaks ---- */
+    .section-title {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #e2e8f0;
+        margin-bottom: 0.5rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
 
-
-    /* ---- data table styling ---- */
+    /* ---- priority table ---- */
     .table-scroll-wrapper {
-        width: 100%;
         overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
+        border-radius: 12px;
+        margin-bottom: 1rem;
     }
     .plot-table {
         width: 100%;
         border-collapse: separate;
-        border-spacing: 0 6px;
-        min-width: 600px;
+        border-spacing: 0 4px;
     }
     .plot-table th {
         text-align: left;
-        padding: 0.6rem 1rem;
-        font-size: 0.75rem;
+        padding: 0.5rem 0.8rem;
+        font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.06em;
         color: #9ca3af;
@@ -445,8 +896,8 @@ st.markdown(
         white-space: nowrap;
     }
     .plot-table td {
-        padding: 0.75rem 1rem;
-        font-size: 0.92rem;
+        padding: 0.65rem 0.8rem;
+        font-size: 0.88rem;
         color: #e5e7eb;
     }
     .plot-table tr.data-row {
@@ -460,200 +911,204 @@ st.markdown(
     .plot-table tr.data-row td:first-child { border-radius: 10px 0 0 10px; }
     .plot-table tr.data-row td:last-child  { border-radius: 0 10px 10px 0; }
 
+    .risk-dot {
+        display: inline-block;
+        width: 10px; height: 10px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
     .priority-badge {
         display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px; height: 32px;
-        border-radius: 8px;
-        font-weight: 700;
-        font-size: 0.95rem;
-    }
-    .risk-dot {
-        width: 12px; height: 12px;
+        align-items: center justify-content: center;
+        width: 28px; height: 28px;
         border-radius: 50%;
-        display: inline-block;
-        margin-right: 6px;
-        box-shadow: 0 0 6px currentColor;
+        font-weight: 800;
+        font-size: 0.85rem;
     }
-
-    /* ---- section headings ---- */
-    .section-title {
-        font-size: 1.05rem;
-        font-weight: 700;
-        color: #d1d5db;
-        margin-bottom: 0.6rem;
-        display: flex;
+    .mode-badge {
+        display: inline-flex;
         align-items: center;
-        gap: 0.5rem;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 0.70rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        background: rgba(239,68,68,0.18);
+        color: #ef4444;
+        border: 1px solid rgba(239,68,68,0.35);
+    }
+    .mode-badge::before {
+        content: '';
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: #ef4444;
+        animation: pulse-dot 1.5s infinite;
+    }
+    @keyframes pulse-dot {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.3; }
     }
 
     /* ---- sidebar ---- */
     section[data-testid="stSidebar"] {
         background: #111827 !important;
     }
-    section[data-testid="stSidebar"] .stSlider label {
-        font-size: 0.85rem !important;
+
+    /* High contrast text for outdoor sunlight */
+    .stCaption, [data-testid="stCaptionContainer"] {
+        color: #94a3b8 !important;
+        font-size: 0.82rem !important;
+    }
+    [data-testid="stWidgetLabel"] p,
+    .stRadio label,
+    .stMultiSelect label,
+    div[data-testid="stRadio"] p {
+        color: #e2e8f0 !important;
+        font-weight: 500 !important;
+    }
+    .stRadio label span, .stRadio div[role="radiogroup"] label div {
+        color: #cbd5e1 !important;
     }
 
+    [data-testid="stExpander"] {
+        border-radius: 10px !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+        background: rgba(255,255,255,0.02) !important;
+        overflow: hidden !important;
+    }
+    [data-testid="stExpander"] summary {
+        color: #f1f5f9 !important;
+        background: rgba(255,255,255,0.03) !important;
+        font-weight: 600 !important;
+    }
+    [data-testid="stExpander"] summary:hover,
+    [data-testid="stExpander"] summary:focus,
+    [data-testid="stExpander"] summary:active {
+        background: rgba(255,255,255,0.07) !important;
+        color: #ffffff !important;
+    }
+    details[data-testid="stExpander"][open] summary {
+        background: rgba(255,255,255,0.05) !important;
+        border-bottom: 1px solid rgba(255,255,255,0.08) !important;
+        color: #60a5fa !important;
+    }
+    [data-testid="stExpanderDetails"] {
+        background: rgba(11, 15, 25, 0.6) !important;
+        padding: 0.75rem 0.6rem !important;
+    }
+"""
 
+st.markdown(
+    f"""
+    <style>
+    /* ---- Google Font ---- */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    html, body, [class*="css"] {{ font-family: 'Inter', sans-serif; }}
 
-    /* ---- live data cards in sidebar ---- */
-    .live-card {
-        background: rgba(255,255,255,0.04);
-        border-radius: 10px;
-        padding: 0.7rem 1rem;
-        margin-bottom: 0.5rem;
-        border-left: 3px solid;
-    }
-    .live-card .plot-label {
-        font-weight: 600;
-        font-size: 0.9rem;
-        color: #e5e7eb;
-    }
-    .live-card .plot-meta {
-        font-size: 0.78rem;
-        color: #9ca3af;
-        margin-top: 2px;
-    }
-    .live-card .vwc-value {
-        font-size: 1.1rem;
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-    }
+    {dark_css if dark_mode else light_css}
 
-    /* ---- mode badge ---- */
-    .mode-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    .mode-live {
-        background: rgba(239,68,68,0.15);
-        color: #ef4444;
-        border: 1px solid rgba(239,68,68,0.3);
-    }
-    .mode-sim {
-        background: rgba(34,197,94,0.15);
-        color: #22c55e;
-        border: 1px solid rgba(34,197,94,0.3);
-    }
+    /* ===== MOBILE-SPECIFIC OPTIMIZATIONS (Smartphones & Field Devices) ===== */
+    @media (max-width: 768px) {{
+        /* Eliminate massive top empty space on mobile */
+        .block-container {{
+            padding-top: 1.0rem !important;
+            padding-bottom: 3.0rem !important;
+            padding-left: 0.6rem !important;
+            padding-right: 0.6rem !important;
+            max-width: 100% !important;
+        }}
 
-    /* ---- audit tab ---- */
-    .audit-method-card {
-        background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%);
-        border: 1px solid rgba(99, 102, 241, 0.2);
-        border-radius: 14px;
-        padding: 1.4rem 1.6rem;
-        margin-bottom: 1rem;
-    }
-    .audit-method-card h4 {
-        color: #a5b4fc;
-        margin: 0 0 0.8rem 0;
-        font-size: 1.05rem;
-    }
-    .audit-method-card .step {
-        display: flex;
-        gap: 0.8rem;
-        margin-bottom: 0.8rem;
-        align-items: flex-start;
-    }
-    .audit-method-card .step-num {
-        background: rgba(99, 102, 241, 0.2);
-        color: #818cf8;
-        width: 28px; height: 28px;
-        min-width: 28px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: 700;
-        font-size: 0.85rem;
-    }
-    .audit-method-card .step-text {
-        color: #d1d5db;
-        font-size: 0.9rem;
-        line-height: 1.5;
-    }
-    .audit-method-card .step-text strong {
-        color: #e0e7ff;
-    }
-    .audit-result-card {
-        background: rgba(255,255,255,0.03);
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 12px;
-        padding: 1rem 1.2rem;
-        margin-bottom: 0.6rem;
-    }
-    .audit-result-card .logger-name {
-        font-weight: 600;
-        color: #e5e7eb;
-        font-size: 0.95rem;
-    }
-    .audit-result-card .vwc-result {
-        font-size: 1.3rem;
-        font-weight: 800;
-        font-variant-numeric: tabular-nums;
-    }
+        header[data-testid="stHeader"] {{
+            height: 2.0rem !important;
+            background: transparent !important;
+        }}
 
+        /* Compact, space-efficient risk banner */
+        .risk-banner {{
+            padding: 0.7rem 0.9rem !important;
+            border-radius: 12px !important;
+            gap: 0.5rem !important;
+        }}
+        .risk-banner-left h1 {{
+            font-size: 1.02rem !important;
+        }}
+        .risk-banner-left .subtitle {{
+            font-size: 0.72rem !important;
+            line-height: 1.3 !important;
+            color: #64748b !important;
+        }}
+        .risk-banner-badge {{
+            padding: 5px 10px !important;
+            gap: 5px !important;
+        }}
+        .risk-banner-badge .badge-emoji {{
+            font-size: 1.05rem !important;
+        }}
+        .risk-banner-badge .badge-text {{
+            font-size: 0.78rem !important;
+        }}
 
+        /* Ergonomic touch targets for navigation tabs */
+        .stTabs [data-baseweb="tab-list"] {{
+            gap: 6px !important;
+            background: #f1f5f9 !important;
+            padding: 4px !important;
+            border-radius: 12px !important;
+            margin-bottom: 0.5rem !important;
+        }}
+        .stTabs [data-baseweb="tab"] {{
+            padding: 10px 14px !important;
+            font-size: 0.90rem !important;
+            font-weight: 600 !important;
+            border-radius: 8px !important;
+            min-height: 44px !important;
+            flex: 1 !important;
+            justify-content: center !important;
+        }}
 
-    /* ===== MOBILE RESPONSIVENESS ===== */
-    @media (max-width: 768px) {
-        .risk-banner {
-            flex-direction: column;
-            text-align: center;
-            padding: 1.2rem 1rem;
-            gap: 0.6rem;
-        }
-        .risk-banner h1 {
-            font-size: 1.15rem;
-        }
-        .risk-banner .subtitle {
-            font-size: 0.82rem;
-        }
-        .risk-banner div[style*="text-align:right"] {
-            text-align: center !important;
-        }
+        /* Zone card touch ergonomics */
+        .zone-card {{
+            padding: 0.8rem 0.95rem !important;
+            border-radius: 12px !important;
+            margin-bottom: 0.5rem !important;
+        }}
+        .zone-card .vwc-big {{ font-size: 1.25rem !important; }}
+        .zone-card .zone-name {{ font-size: 0.92rem !important; }}
+        .zone-card .zone-action {{ 
+            font-size: 0.78rem !important; 
+            padding: 0.3rem 0.6rem !important;
+        }}
 
-        .plot-table th {
-            padding: 0.4rem 0.6rem;
-            font-size: 0.68rem;
-        }
-        .plot-table td {
-            padding: 0.5rem 0.6rem;
-            font-size: 0.82rem;
-        }
-        .priority-badge {
-            width: 26px; height: 26px;
-            font-size: 0.82rem;
-        }
-        .section-title {
-            font-size: 0.95rem;
-        }
-        .audit-method-card {
-            padding: 1rem 1.1rem;
-        }
-        .audit-method-card .step-text {
-            font-size: 0.82rem;
-        }
-        .live-card {
-            padding: 0.5rem 0.7rem;
-        }
-        .live-card .plot-label {
-            font-size: 0.82rem;
-        }
-        .live-card .vwc-value {
-            font-size: 0.95rem;
-        }
+        /* Expander headers touch friendly */
+        [data-testid="stExpander"] summary {{
+            padding: 0.65rem 0.8rem !important;
+            font-size: 0.88rem !important;
+            min-height: 44px !important;
+        }}
 
-    }
+        .plot-table th {{
+            padding: 0.35rem 0.5rem !important;
+            font-size: 0.65rem !important;
+        }}
+        .plot-table td {{
+            padding: 0.45rem 0.5rem !important;
+            font-size: 0.78rem !important;
+        }}
+        .priority-badge {{
+            width: 26px !important; height: 26px !important;
+            font-size: 0.82rem !important;
+        }}
+
+        /* Stack Streamlit columns on mobile */
+        [data-testid="column"] {{
+            width: 100% !important;
+            flex: 100% !important;
+            min-width: 100% !important;
+        }}
+    }}
+    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -661,46 +1116,43 @@ st.markdown(
 
 
 # ----------------------------------------------
-# 6. DATA MODE TOGGLE + DATA FETCH
-#    (controls are rendered in Tab 1 below;
-#     data fetch must happen before the banner)
+# 6. DATA FETCH (always live)
 # ----------------------------------------------
 now = _dt.datetime.now()
-live_mode = st.toggle("Live Data Mode", value=False, key="live_mode")
+time_key = _get_cache_time_key()
+live_data, depth_data, success = fetch_live_data(time_key)
 
-# -- Fetch / update data regardless of where the UI lives --------
-if live_mode:
-    time_key = _get_cache_time_key()
-    live_data, success = fetch_live_data(time_key)
+# Fallback logic: persist last-known-good data in session state
+if success and live_data:
+    st.session_state.last_live_data = live_data
+    st.session_state.last_depth_data = depth_data
+    st.session_state.connection_ok = True
+elif not success:
+    st.session_state.connection_ok = False
+    if st.session_state.last_live_data:
+        live_data = st.session_state.last_live_data
+        depth_data = st.session_state.last_depth_data
+    else:
+        live_data = {}
+        depth_data = {}
 
-    # Fallback logic: persist last-known-good data in session state
-    if success and live_data:
-        st.session_state.last_live_data = live_data
-        st.session_state.connection_ok = True
-    elif not success:
-        st.session_state.connection_ok = False
-        if st.session_state.last_live_data:
-            live_data = st.session_state.last_live_data
-        else:
-            live_data = {}
-
-    # Update plots from live readings
-    for plot in st.session_state.plots:
-        if plot.logger_id in live_data:
-            plot.update(live_data[plot.logger_id], now)
-else:
-    live_data = {}  # placeholder; sliders rendered in Tab 1
+# Update plots from live readings
+for plot in st.session_state.plots:
+    if plot.logger_id in live_data:
+        plot.update(
+            live_data[plot.logger_id],
+            per_depth=depth_data.get(plot.logger_id, {}),
+        )
 
 
 # ----------------------------------------------
-# 7. CONNECTION WARNING (live mode only)
+# 7. CONNECTION WARNING
 # ----------------------------------------------
-if live_mode and not st.session_state.connection_ok:
+if not st.session_state.connection_ok:
     st.warning(
         "**Connection Lost** — Unable to reach the MajiSys sensor "
-        "server at `majisysdemo.itc.utwente.nl`. Displaying last known "
-        "values. Data will refresh automatically when the connection "
-        "is restored.",
+        "server. Displaying last known values. Data will refresh "
+        "automatically when the connection is restored.",
     )
 
 
@@ -710,32 +1162,22 @@ if live_mode and not st.session_state.connection_ok:
 farm_risk = overall_risk(st.session_state.plots)
 ri = RISK_PALETTE[farm_risk]
 
-mode_indicator = (
-    '<span class="mode-badge mode-live" style="margin-left:8px;">LIVE</span>'
-    if live_mode
-    else '<span class="mode-badge mode-sim" style="margin-left:8px;">SIM</span>'
-)
-
 st.markdown(
     f"""
     <div class="risk-banner"
          style="background:{ri['bg']}; border:1px solid {ri['color']}33;">
-        <div>
+        <div class="risk-banner-left">
             <h1 style="color:{ri['text_color']};">
-                Glanerbeek Forest Dashboard {mode_indicator}
+                🌳 Glanerbeek Forest
+                <span class="mode-badge" style="margin-left:6px; vertical-align:middle;">LIVE</span>
             </h1>
             <div class="subtitle" style="color:{ri['text_color']};">
-                Farm-wide ecological status&ensp;&middot;&ensp;
-                {len(st.session_state.plots)} monitored plots
+                Farm-wide status&ensp;&middot;&ensp;{len(st.session_state.plots)} zones&ensp;&middot;&ensp;Updated {now.strftime('%H:%M')}
             </div>
         </div>
-        <div style="text-align:right;">
-            <div style="font-size:1.4rem;font-weight:800;color:{ri['color']};">
-                Level {farm_risk}
-            </div>
-            <div style="font-size:0.85rem;font-weight:600;color:{ri['color']};">
-                {ri['label']}
-            </div>
+        <div class="risk-banner-badge" style="background:{ri['color']}22; border:1.5px solid {ri['color']}; color:{ri['color']};">
+            <span class="badge-emoji">{ri['emoji']}</span>
+            <span class="badge-text">{ri['label']}</span>
         </div>
     </div>
     """,
@@ -744,97 +1186,262 @@ st.markdown(
 
 
 # ----------------------------------------------
-# 9. LAYOUT -- TABBED
+# 9. LAYOUT -- TABBED (Dashboard + Farm Map)
 # ----------------------------------------------
-tab_dashboard, tab_audit = st.tabs(["Live Dashboard", "Data Pipeline Audit"])
+tab_map, tab_dashboard = st.tabs(["🗺️ Farm Map", "📊 Zone Monitor"])
+
+# ============================================
+# 10. FARM MAP TAB
+# ============================================
+with tab_map:
+    st.markdown(
+        '<div class="section-title">🗺️ Farm Sensor Map</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Spatial overview of all monitoring zones. Each station shows concentric "
+        "depth rings colored by moisture status. Hover for exact VWC readings."
+    )
+
+    # ── Sensor pixel positions on the satellite image (1200 x 1315 px) ──
+    # Mapped from WUNDER PDF page 6 station labels to pixel coordinates.
+    # GP-06 EXCLUDED (Water Potential station, not a VWC station).
+    SENSOR_POSITIONS = {
+        "GP-01": {"x": 327, "y": 1060, "label": "GP-01", "sub": "F1-1 · ATMOS + VWC", "field": 1},
+        "GP-02": {"x": 214, "y": 695,  "label": "GP-02", "sub": "F1-2 · Soil Moisture", "field": 1},
+        "GP-03": {"x": 324, "y": 811,  "label": "GP-03", "sub": "F1-3 · Soil Moisture", "field": 1},
+        "GP-04": {"x": 513, "y": 568,  "label": "GP-04", "sub": "F2-1 · ATMOS + VWC", "field": 2},
+        "GP-05": {"x": 428, "y": 231,  "label": "GP-05", "sub": "F2-2 · Soil Moisture", "field": 2},
+    }
+
+    # Image dimensions for coordinate mapping
+    _IMG_W, _IMG_H = 1200, 1315
+
+    DEPTH_ORDER = ["40 cm", "20 cm", "10 cm", "5 cm"]  # outer to inner
+    RING_SIZES = [54, 38, 26, 16]  # marker sizes for concentric rings
+
+    def _vwc_to_color(vwc: float) -> str:
+        """Map VWC percentage to a color on a continuous gradient."""
+        if vwc >= 25:
+            return "rgb(34, 197, 94)"    # bright green
+        elif vwc >= 17:
+            r = int(34 + (234 - 34) * (25 - vwc) / 8)
+            g = int(197 + (179 - 197) * (25 - vwc) / 8)
+            b = int(94 + (8 - 94) * (25 - vwc) / 8)
+            return f"rgb({r}, {g}, {b})"
+        elif vwc >= 9:
+            r = int(234 + (239 - 234) * (17 - vwc) / 8)
+            g = int(179 + (68 - 179) * (17 - vwc) / 8)
+            b = int(8 + (68 - 8) * (17 - vwc) / 8)
+            return f"rgb({r}, {g}, {b})"
+        else:
+            return "rgb(239, 68, 68)"    # bright red
+
+    try:
+        import plotly.graph_objects as go
+        import base64
+
+        # ── Load satellite image as base64 for Plotly background ──
+        _sat_path = Path(__file__).resolve().parent / "satellite_map.png"
+        with open(_sat_path, "rb") as _f:
+            _sat_b64 = base64.b64encode(_f.read()).decode()
+
+        fig = go.Figure()
+
+        # ── Draw Concentric Rings for Each Sensor Station ──
+        for plot in st.session_state.plots:
+            pos = SENSOR_POSITIONS.get(plot.id)
+            if not pos:
+                continue
+
+            # Draw rings from outer (deepest) to inner (shallowest)
+            for depth_label, ring_size in zip(DEPTH_ORDER, RING_SIZES):
+                vwc_val = plot.per_depth_vwc.get(depth_label)
+                if vwc_val is not None:
+                    color = _vwc_to_color(vwc_val)
+                    hover_text = (
+                        f"<b>{plot.id} — {plot.name}</b><br>"
+                        f"Depth: {depth_label}<br>"
+                        f"VWC: {vwc_val:.1f}%<br>"
+                        f"Status: {RISK_PALETTE[vwc_to_risk(vwc_val)]['label']}"
+                    )
+                else:
+                    color = "rgba(107, 114, 128, 0.4)"
+                    hover_text = (
+                        f"<b>{plot.id} — {plot.name}</b><br>"
+                        f"Depth: {depth_label}<br>"
+                        f"No data"
+                    )
+
+                fig.add_trace(go.Scatter(
+                    x=[pos["x"]],
+                    y=[_IMG_H - pos["y"]],  # flip Y for image coords
+                    mode='markers',
+                    marker=dict(
+                        size=ring_size,
+                        color=color,
+                        line=dict(width=1.5, color="rgba(255,255,255,0.65)"),
+                    ),
+                    hovertemplate=hover_text + "<extra></extra>",
+                    showlegend=False,
+                ))
+
+            fig.add_annotation(
+                x=pos["x"], y=_IMG_H - pos["y"] + 36,  # 36px above the center
+                text=f"<b>{plot.id}</b>",
+                showarrow=False,
+                font=dict(size=13, color="#f8fafc" if dark_mode else "#0f172a"),
+            )
+
+        # ── Color scale legend (horizontal at bottom) ──
+        legend_x_vals = [120, 270, 420, 570, 720, 870]
+        legend_vwc_vals = [5, 9, 13, 17, 21, 25]
+        for lx, lv in zip(legend_x_vals, legend_vwc_vals):
+            fig.add_trace(go.Scatter(
+                x=[lx], y=[-22],
+                mode='markers+text',
+                marker=dict(size=13, color=_vwc_to_color(lv)),
+                text=[f"{lv}%"],
+                textposition="bottom center",
+                textfont=dict(size=9, color="#9ca3af" if dark_mode else "#64748b"),
+                showlegend=False,
+                hoverinfo='skip',
+            ))
+
+        fig.add_annotation(
+            x=50, y=-22,
+            text="<b>VWC:</b>",
+            showarrow=False,
+            font=dict(size=10, color="#9ca3af" if dark_mode else "#475569"),
+        )
+
+        # Depth ring legend text
+        fig.add_annotation(
+            x=_IMG_W / 2, y=-75,
+            text="Concentric ring depths: outer = 40 cm → inner = 5 cm",
+            showarrow=False,
+            font=dict(size=9.5, color="#6b7280" if dark_mode else "#64748b"),
+        )
+
+        fig.update_layout(
+            height=680,
+            margin=dict(l=5, r=5, t=5, b=95),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Inter"),
+            xaxis=dict(
+                range=[0, _IMG_W],
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+                fixedrange=True,
+            ),
+            yaxis=dict(
+                range=[-100, _IMG_H],
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+                scaleanchor="x",
+                fixedrange=True,
+            ),
+            images=[dict(
+                source=f"data:image/png;base64,{_sat_b64}",
+                xref="x", yref="y",
+                x=0, y=_IMG_H,
+                sizex=_IMG_W, sizey=_IMG_H,
+                sizing="stretch",
+                opacity=1.0,
+                layer="below",
+            )],
+            hovermode="closest",
+        )
+
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key="farm_map",
+            config={"displayModeBar": False, "responsive": True, "scrollZoom": False},
+        )
+
+    except ImportError:
+        st.error("Plotly is required for the Farm Map. Install with: `pip install plotly`")
+
+    st.caption(
+        "Satellite imagery from WUNDER project (ITC, University of Twente). "
+        "Each concentric ring represents a sensor depth "
+        "(outer ring = 40 cm, inner = 5 cm). Colors indicate VWC severity on a "
+        "continuous gradient from 🟢 optimal to 🔴 critical."
+    )
+
+
+
+
+
+
+
 
 with tab_dashboard:
 
     # ============================================
-    # 9a. DASHBOARD CONTROLS
-    #     (Mode toggle + live cards / sim sliders)
-    # ============================================
-    if live_mode:
-        st.markdown(
-            '<span class="mode-badge mode-live">LIVE — MajiSys Sensors</span>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Fetching last 24 h from ITC Twente sensor network.  "
-            "Worst-case VWC from top 40 cm depths."
-        )
-
-        # Render live reading cards
-        for plot in st.session_state.plots:
-            ri = RISK_PALETTE[plot.risk_level]
-            has_data = plot.logger_id in live_data
-            vwc_display = f"{plot.vwc:.1f}%" if has_data else "-- no data"
-            st.markdown(
-                f"""
-                <div class="live-card" style="border-color:{ri['color']};">
-                    <div style="display:flex;justify-content:space-between;
-                                align-items:center;">
-                        <div>
-                            <div class="plot-label">
-                                <span class="risk-dot"
-                                      style="color:{ri['color']};
-                                             background:{ri['color']};"></span>
-                                {plot.id} — {plot.name}
-                            </div>
-                            <div class="plot-meta">
-                                Logger: {plot.logger_id} | Field {plot.field}
-                            </div>
-                        </div>
-                        <div class="vwc-value" style="color:{ri['color']};">
-                            {vwc_display}
-                        </div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-    else:
-        st.markdown(
-            '<span class="mode-badge mode-sim">SIMULATION — Manual</span>',
-            unsafe_allow_html=True,
-        )
-        st.caption(
-            "Drag sliders to simulate VWC readings and test "
-            "ecological thresholds."
-        )
-
-        # Render simulation sliders
-        for plot in st.session_state.plots:
-            ri = RISK_PALETTE[plot.risk_level]
-            label = f"**{plot.id}** — {plot.name}"
-            new_vwc = st.slider(
-                label,
-                min_value=0.0,
-                max_value=60.0,
-                value=plot.vwc,
-                step=0.5,
-                format="%.1f %%",
-                key=f"vwc_{plot.id}",
-            )
-            plot.update(new_vwc, now)
-
-    st.caption(
-        "VWC thresholds:  >=17% Optimal  |  >=13% Microbial Stress  |  "
-        ">=9% Severe  |  >=5% Wilting  |  <5% Cessation"
-    )
-
-    st.divider()
-
-    # ============================================
-    # 9b. SPATIAL PRIORITY TABLE
-    #     (Full-width block below the action center)
+    # 9a. ZONE CARDS WITH LIVE DATA
     # ============================================
     st.markdown(
-        '<div class="section-title">Spatial Priority Ranking</div>',
+        '<div class="section-title">📡 Live Zone Status</div>',
         unsafe_allow_html=True,
     )
 
-    # Sort plots by spatial_priority descending (highest urgency first)
+    for plot in st.session_state.plots:
+        ri = RISK_PALETTE[plot.risk_level]
+        has_data = plot.logger_id in live_data
+        vwc_display = f"{plot.vwc:.1f}%" if has_data else "—"
+
+        # Action text
+        action_bg = f"{ri['color']}15"
+        action_text = ri['action']
+
+        st.markdown(
+            f"""
+            <div class="zone-card" style="border-color:{ri['color']};">
+                <div class="zone-header">
+                    <div>
+                        <div class="zone-name">
+                            <span class="risk-dot"
+                                  style="color:{ri['color']};
+                                         background:{ri['color']};"></span>
+                            {plot.id} — {plot.name}
+                        </div>
+                        <div class="zone-meta">
+                            Field {plot.field}&ensp;&middot;&ensp;{plot.area_ha} ha&ensp;&middot;&ensp;Logger: {plot.logger_id}
+                        </div>
+                    </div>
+                    <div class="vwc-big" style="color:{ri['color']};">
+                        {vwc_display}
+                    </div>
+                </div>
+                <div class="zone-action"
+                     style="background:{action_bg}; color:{ri['color']};">
+                    {ri['emoji']} {action_text}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        # Historical trend chart (expandable)
+        with st.expander(f"📈 Historical Trend — {plot.id}"):
+            _render_historical_chart(plot)
+
+    # ============================================
+    # 9b. SPATIAL PRIORITY TABLE
+    # ============================================
+    st.divider()
+
+    st.markdown(
+        '<div class="section-title">🎯 Spatial Priority Ranking</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Sort plots by priority descending (highest urgency first)
     sorted_plots = sorted(
         st.session_state.plots,
         key=lambda p: p.spatial_priority,
@@ -844,9 +1451,6 @@ with tab_dashboard:
     rows_html = ""
     for p in sorted_plots:
         pi = RISK_PALETTE[p.risk_level]
-        source_label = (
-            f"{p.logger_id}" if live_mode else "Manual"
-        )
         rows_html += f"""
         <tr class="data-row">
             <td style="font-weight:600;">{p.id}</td>
@@ -865,11 +1469,8 @@ with tab_dashboard:
                     {p.spatial_priority}
                 </span>
             </td>
-            <td style="font-variant-numeric:tabular-nums;color:#93c5fd;">
+            <td style="font-variant-numeric:tabular-nums;color:{'#93c5fd' if dark_mode else '#2563eb'};">
                 {p.vwc:.1f}%
-            </td>
-            <td style="font-size:0.78rem;color:#6b7280;">
-                {source_label}
             </td>
         </tr>
         """
@@ -880,13 +1481,12 @@ with tab_dashboard:
         <table class="plot-table">
             <thead>
                 <tr>
-                    <th>Plot ID</th>
+                    <th>Zone</th>
                     <th>Name</th>
                     <th>Area</th>
-                    <th>Risk State</th>
+                    <th>Status</th>
                     <th style="text-align:center;">Priority</th>
                     <th>VWC</th>
-                    <th>Source</th>
                 </tr>
             </thead>
             <tbody>{rows_html}</tbody>
@@ -896,257 +1496,13 @@ with tab_dashboard:
         unsafe_allow_html=True,
     )
 
-    # ------------------------------------------
-    # 10. FOOTER
-    # ------------------------------------------
+    # ---- FOOTER ----
     st.divider()
-    mode_str = "Live (MajiSys)" if live_mode else "Manual Simulation"
     st.caption(
-        f"Glanerbeek Dashboard  |  Prototype v0.2  |  Mode: {mode_str}  |  "
-        f"Last refresh: {now.strftime('%Y-%m-%d %H:%M:%S')}  |  "
-        f"Thresholds: 17% Yellow  |  9% Red (Sandy Loam Baseline)"
+        f"Glanerbeek Dashboard V3  |  Live (MajiSys)  |  "
+        f"Updated: {now.strftime('%d %b %H:%M')}  |  "
+        f"Thresholds: 17% Irrigation Trigger  |  9% Critical (Sandy Loam)"
     )
 
-with tab_audit:
-    # ------------------------------------------
-    # AUDIT TAB -- Data Pipeline Transparency
-    # ------------------------------------------
-    st.markdown(
-        '<div class="section-title">Data Pipeline Audit</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Academic transparency view — inspect each stage of the "
-        "sensor data pipeline from raw API response to final VWC values."
-    )
 
-    # -- Methodology explainer (full-width, top of audit tab) --
-    st.markdown(
-        """
-        <div class="audit-method-card">
-            <h4>3-Step Pipeline Methodology</h4>
-            <div class="step">
-                <div class="step-num">1</div>
-                <div class="step-text">
-                    <strong>Fetch ZENTRA API Payload</strong><br>
-                    HTTP GET requests to the MajiSys server at
-                    <code>majisysdemo.itc.utwente.nl</code> retrieve
-                    raw CSV data for each ZENTRA Z6 datalogger.
-                    Each logger reports soil-moisture readings at
-                    multiple depth intervals (5 cm, 10 cm, 20 cm, etc.).
-                </div>
-            </div>
-            <div class="step">
-                <div class="step-num">2</div>
-                <div class="step-text">
-                    <strong>Clean Missing Data via Pandas</strong><br>
-                    Raw CSV rows are parsed and converted into Pandas
-                    DataFrames. Sensors with &lt;90 % data completeness
-                    are discarded. An <em>inner join</em> aligns
-                    timestamps across depth columns, ensuring only
-                    complete observations are retained.
-                </div>
-            </div>
-            <div class="step">
-                <div class="step-num">3</div>
-                <div class="step-text">
-                    <strong>Worst-Case Conservative 40 cm Filter</strong><br>
-                    Only sensors at depths &le; 40 cm (the root zone most
-                    relevant to food-forest ecology) are retained.
-                    From the most recent timestamp, the <em>minimum</em>
-                    VWC fraction is selected &mdash; the driest sensor
-                    reading &mdash; and converted to a percentage
-                    (m&sup3;/m&sup3; &times; 100). This conservative
-                    approach ensures the dashboard never underestimates
-                    drought stress.
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
-    st.markdown(
-        """
-        <div class="audit-method-card" style="border-color: rgba(234,179,8,0.2);
-                    background: linear-gradient(135deg, #422006 0%, #1c1917 100%);">
-            <h4 style="color:#fef08a;">Technical Parameters</h4>
-            <div class="step-text" style="color:#d1d5db;">
-                <strong style="color:#fef08a;">API Endpoint:</strong>
-                <code>http://majisysdemo.itc.utwente.nl/florapulse/get7days.py</code><br><br>
-                <strong style="color:#fef08a;">Time Window:</strong> Last 24 hours<br><br>
-                <strong style="color:#fef08a;">Max Depth Filter:</strong> &le; 40 cm<br><br>
-                <strong style="color:#fef08a;">Aggregation:</strong> min() across qualifying sensors<br><br>
-                <strong style="color:#fef08a;">Data Freshness:</strong> Cached for 15 min (TTL = 900 s)
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.divider()
-
-    # -- Data views (full-width, below methodology) --
-    audit_active = st.toggle(
-        "Load Pipeline Data from MajiSys API",
-        key="audit_active",
-    )
-
-    if audit_active:
-        time_key = _get_cache_time_key()
-        raw_csvs, cleaned_dfs, filtered_results, audit_ok = (
-            fetch_raw_audit_data(time_key)
-        )
-
-        if not audit_ok:
-            st.error(
-                "Could not reach the MajiSys API. "
-                "Check your network connection.",
-            )
-        else:
-            # -- View 1: Raw API Data ----------------
-            st.markdown(
-                '<div class="section-title">'
-                'View 1 — Raw API Response</div>',
-                unsafe_allow_html=True,
-            )
-            st.caption(
-                "Unprocessed CSV text returned by each ZENTRA "
-                "datalogger. Showing the first 30 lines per logger."
-            )
-
-            for logger_id, csv_text in raw_csvs.items():
-                station_name = next(
-                    (p["name"] for p in PLOT_DEFINITIONS
-                     if p["logger_id"] == logger_id),
-                    logger_id,
-                )
-                csv_lines = csv_text.split("\n")
-                preview = "\n".join(csv_lines[:30])
-                with st.expander(
-                    f"{logger_id} — {station_name}  "
-                    f"({len(csv_lines)} lines total)"
-                ):
-                    st.code(preview, language="csv")
-
-            st.divider()
-
-            # -- View 2: Processed / Filtered Data ---
-            st.markdown(
-                '<div class="section-title">'
-                'View 2 — Processed Data</div>',
-                unsafe_allow_html=True,
-            )
-
-            show_filter = st.toggle(
-                "Run Worst-Case 40 cm Filter",
-                key="show_filter",
-            )
-
-            if show_filter:
-                for logger_id in cleaned_dfs:
-                    station_name = next(
-                        (p["name"] for p in PLOT_DEFINITIONS
-                         if p["logger_id"] == logger_id),
-                        logger_id,
-                    )
-                    df_full = cleaned_dfs[logger_id]
-                    fr = filtered_results.get(logger_id)
-
-                    with st.expander(
-                        f"{logger_id} — {station_name}",
-                        expanded=True,
-                    ):
-                        st.markdown(
-                            "**Cleaned DataFrame** (all depths)"
-                        )
-                        st.dataframe(
-                            df_full.tail(10),
-                            use_container_width=True,
-                        )
-
-                        if fr:
-                            cols_info = fr["columns_info"]
-                            inc = [
-                                c for c in cols_info
-                                if c["included"]
-                            ]
-                            exc = [
-                                c for c in cols_info
-                                if not c["included"]
-                            ]
-
-                            st.markdown(
-                                "**Included sensors** (depth <= 40 cm)"
-                            )
-                            for c in inc:
-                                st.markdown(
-                                    f"- `{c['column']}` "
-                                    f"— {c['depth_cm']:.0f} cm"
-                                )
-
-                            if exc:
-                                st.markdown(
-                                    "**Excluded sensors** (depth > 40 cm)"
-                                )
-                                for c in exc:
-                                    st.markdown(
-                                        f"- `{c['column']}` "
-                                        f"— {c['depth_cm']:.0f} cm"
-                                    )
-
-                            st.markdown(
-                                "**Filtered DataFrame** "
-                                "(top 40 cm only)"
-                            )
-                            top_df = fr["top_40cm_df"]
-                            st.dataframe(
-                                top_df.tail(10),
-                                use_container_width=True,
-                            )
-
-                            vwc = fr["min_vwc_pct"]
-                            if vwc is not None:
-                                risk = vwc_to_risk(vwc)
-                                ri_card = RISK_PALETTE[risk]
-                                st.markdown(
-                                    f"""
-                                    <div class="audit-result-card"
-                                         style="border-color:
-                                         {ri_card['color']}33;">
-                                        <div class="logger-name">
-                                            <span class="risk-dot"
-                                                  style="color:{ri_card['color']};
-                                                         background:{ri_card['color']};"></span>
-                                            Worst-Case Result
-                                        </div>
-                                        <div class="vwc-result"
-                                             style="color:
-                                             {ri_card['color']};">
-                                            {vwc:.2f} % VWC
-                                        </div>
-                                        <div style="font-size:0.8rem;
-                                             color:#9ca3af;
-                                             margin-top:4px;">
-                                            Risk Level {risk}
-                                            &mdash; {ri_card['label']}
-                                            &ensp;&middot;&ensp;
-                                            min() of {len(inc)}
-                                            sensor(s) at most recent
-                                            timestamp
-                                        </div>
-                                    </div>
-                                    """,
-                                    unsafe_allow_html=True,
-                                )
-            else:
-                st.caption(
-                    "Toggle the filter above to see how the raw "
-                    "data is transformed into the worst-case VWC "
-                    "values shown on the Live Dashboard."
-                )
-    else:
-        st.info(
-            "Toggle **Load Pipeline Data** above to fetch raw "
-            "sensor data and inspect the processing pipeline.",
-        )
