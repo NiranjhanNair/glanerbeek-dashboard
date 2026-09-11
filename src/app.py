@@ -1112,7 +1112,7 @@ st.markdown(
         .js-plotly-plot .plotly .drag,
         .js-plotly-plot .plotly .nsewdrag,
         .js-plotly-plot .plotly .main-svg {{
-            touch-action: pan-y !important;
+            touch-action: pan-y pinch-zoom !important;
         }}
     }}
     }}
@@ -1336,7 +1336,7 @@ with tab_map:
             paper_bgcolor='rgba(0,0,0,0)',
             plot_bgcolor='rgba(0,0,0,0)',
             font=dict(family="Inter"),
-            dragmode=False,  # disable single-finger drag so page scroll works on mobile
+            dragmode="pan",  # set to pan so pinch-to-zoom works and taps don't trigger box zoom
             xaxis=dict(
                 range=[0, _IMG_W],
                 showgrid=False,
